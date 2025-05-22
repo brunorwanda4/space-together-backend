@@ -39,7 +39,7 @@ export class UserService {
       return await this.dbService.user.create({
         data: {
           email,
-          name,
+          fullName : name,
           password: hashedPassword,
           username: generateUsername(name),
         },
@@ -96,7 +96,7 @@ export class UserService {
     try {
       const user = await this.dbService.user.findUnique({
         where, include: {
-          school: {
+          schoolCreatorOf: {
             select: {
               name: true, id: true, logo: true, username: true
             }

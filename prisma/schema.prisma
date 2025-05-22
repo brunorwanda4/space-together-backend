@@ -21,11 +21,12 @@ datasource db {
 // ENUMS
 // ======================================
 enum UserRole {
-    STUDENT_ROLE
-    TEACHER_ROLE
-    SCHOOL_ADMIN_ROLE
-    SCHOOL_STAFF_ROLE
-    PARENT_GUARDIAN_ROLE
+    STUDENT
+    TEACHER
+    SCHOOL_ADMIN
+    SCHOOL_STAFF
+    PARENT_GUARDIAN
+    ADMIN
 }
 
 enum Gender {
@@ -304,7 +305,7 @@ model School {
     // --- School Identity ---
     name        String     @unique // Assuming school name should be unique, or use username
     username    String     @unique
-    logoUrl     String?
+    logo        String?
     schoolType  SchoolType
     description String?
 
@@ -540,20 +541,20 @@ model CourseTemplate {
 model Class {
     // --- Identification ---
     id               String          @id @default(auto()) @map("_id") @db.ObjectId
-    schoolId         String          @db.ObjectId
-    school           School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-    creatorId        String          @db.ObjectId
-    creator          User            @relation("ClassCreator", fields: [creatorId], references: [id])
+    schoolId         String?         @db.ObjectId
+    school           School?         @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+    creatorId        String?         @db.ObjectId
+    creator          User?           @relation("ClassCreator", fields: [creatorId], references: [id])
     courseTemplateId String?         @db.ObjectId
     courseTemplate   CourseTemplate? @relation(fields: [courseTemplateId], references: [id], onDelete: SetNull)
 
     // --- Class details ---
-    name          String
-    classCode     String          @unique // Unique code for joining the class
-    username      String          @unique // Unique username/slug for the class
-    description   String?
-    classImageUrl String?
-    classType     ClassTypeOption @default(MAIN_SCHOOL_CLASS)
+    name        String
+    classCode   String          @unique // Unique code for joining the class
+    username    String          @unique // Unique username/slug for the class
+    description String?
+    classImage  String?
+    classType   ClassTypeOption @default(MAIN_SCHOOL_CLASS)
 
     // --- Scheduling ---
     academicTermName String?
@@ -626,17 +627,17 @@ model ClassMember {
 // --------------------------
 model CourseContentModule {
     // --- Identification ---
-    id       String @id @default(auto()) @map("_id") @db.ObjectId
-    classId  String @db.ObjectId
-    class    Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
-    authorId String @db.ObjectId
-    author   User   @relation("CourseContentModuleAuthor", fields: [authorId], references: [id]) // Assuming author is a User
+    id       String  @id @default(auto()) @map("_id") @db.ObjectId
+    classId  String? @db.ObjectId
+    class    Class?  @relation(fields: [classId], references: [id], onDelete: Cascade)
+    authorId String? @db.ObjectId
+    author   User?   @relation("CourseContentModuleAuthor", fields: [authorId], references: [id]) // Assuming author is a User
 
     // --- Module details ---
     title        String
     moduleCode   String? // Optional code for the module, unique within class if used
     description  String?
-    orderInClass Int // To order modules within a class
+    orderInClass Int? // To order modules within a class
 
     // --- Type and timing ---
     moduleType             CourseContentModuleType?

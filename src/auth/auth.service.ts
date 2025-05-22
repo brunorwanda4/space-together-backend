@@ -77,12 +77,12 @@ export class AuthService {
     async signIn(user: User): Promise<AuthUserDto> {
         const basePayload: Omit<AuthUserDto, 'accessToken' | 'schoolAccessToken'> = {
             id: user.id,
-            name: user.name,
+            name: user.fullName,
             username: user.username,
             email: user.email,
-            phone: user.phone ?? undefined,
+            phone: user.phoneNumber ?? undefined,
             image: user.image ?? undefined,
-            role: user.role ?? undefined,
+            role: user.role === 'SCHOOL_ADMIN' ? 'ADMIN' : user.role ?? undefined,
         };
 
         const accessToken = await this.jwtService.signAsync(basePayload);
@@ -91,23 +91,6 @@ export class AuthService {
             ...basePayload,
             accessToken,
         };
-
-        // Check if school-specific token is needed
-        if (user.currentSchoolId && (user.role === 'SCHOOLSTAFF' || user.role === 'TEACHER')) {
-            try {
-                const schoolAccessToken = await this.generateSchoolToken(user.id, user.currentSchoolId, user);
-                if (schoolAccessToken) {
-                    tokenResponse.schoolAccessToken = schoolAccessToken;
-                } else {
-                    // Log that expected school data was missing but proceed with base token
-                    this.logger.warn(`Could not generate school token for user ${user.id} and school ${user.currentSchoolId}. School or Staff data missing.`);
-                }
-            } catch (error) {
-                this.logger.error(`Failed to generate school token for user ${user.id}: ${error.message}`, error.stack);
-                // Decide if you want to throw an error or just return the base token
-                // throw new InternalServerErrorException('Failed to generate school-specific token');
-            }
-        }
 
         return tokenResponse;
     }
@@ -148,9 +131,9 @@ export class AuthService {
         const schoolPayload: SchoolAuthPayloadDto = {
             sub: schoolStaff.id, // Use staff ID as subject for school context
             schoolId: schoolStaff.schoolId,
-            name: user.name, // User's name
+            name: user.fullName, // User's name
             email: user.email, // User's email
-            role: schoolStaff.role, // Role within the school
+            role: schoolStaff.roleTitle, // Role within the school
             schoolDescription: school.description ?? undefined,
             schoolEmail: school.contact?.email,
             schoolName: school.name,

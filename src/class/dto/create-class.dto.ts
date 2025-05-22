@@ -5,9 +5,11 @@ import { z } from 'zod';
 
 // If you need to define it for Zod directly:
 export const ClassType = {
-    Private: 'Private',
-    Public: 'Public',
-    SchoolClass: 'SchoolClass',
+    MAIN_SCHOOL_CLASS: 'MAIN_SCHOOL_CLASS',
+    EXTRACURRICULAR: 'EXTRACURRICULAR',
+    STUDY_GROUP: 'STUDY_GROUP',
+    PRIVATE_TUTORING: 'PRIVATE_TUTORING',
+    PUBLIC_COURSE: 'PUBLIC_COURSE',
     // add other types if they exist
   } as const; // Use as const for Zod nativeEnum
 export const CreateClassSchema = z.object({

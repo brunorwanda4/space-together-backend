@@ -4,7 +4,7 @@ import { SchoolAcademicCreationDto, SchoolAcademicDto, SchoolAcademicSchema } fr
 import { DbService } from 'src/db/db.service';
 import { generateCode, generateUsername } from 'src/common/utils/characters.util';
 import { UploadService } from 'src/upload/upload.service';
-import { ModuleType, Prisma } from 'generated/prisma';
+import { Prisma, SchoolJoinRequestRole } from 'generated/prisma';
 import { SchoolAdministrationDto, SchoolAdministrationSchema } from './dto/school-administration.dto';
 import { sendAdministrationJoinRequestsDto } from 'src/join-school-request/dto/join-school-request.dto';
 import { hashCode } from 'src/common/utils/hash.util';
@@ -30,8 +30,8 @@ export class SchoolService {
                 this.dbService.school.findUnique({ where: { username } })
             ]);
 
-            if (!creator || (creator.role !== "SCHOOLSTAFF" && creator.role !== "ADMIN")) {
-                throw new BadRequestException('you can not create school')
+            if (!creator || (creator.role !== "SCHOOL_ADMIN" && creator.role !== "ADMIN")) {
+                throw new BadRequestException('You cannot create a school')
             }
 
             if (getSchoolByUsername) {
@@ -42,18 +42,21 @@ export class SchoolService {
                 const uploaded = await this.uploadService.uploadBase64Image(logo, 'logos');
                 imageUrl = uploaded.secure_url;
             }
-            const studentsCode = await hashCode(generateCode());
-            const teachersCode = await hashCode(generateCode());
-            const schoolStaffsCode = await hashCode(generateCode());
+            const studentInvitationCode = await hashCode(generateCode());
+            const teacherInvitationCode = await hashCode(generateCode());
+            const staffInvitationCode = await hashCode(generateCode());
+            const parentInvitationCode = await hashCode(generateCode());
             return await this.dbService.school.create({
                 data: {
                     name,
                     creatorId,
                     logo: imageUrl,
                     username,
-                    studentsCode,
-                    teachersCode,
-                    schoolStaffsCode,
+                    studentInvitationCode,
+                    teacherInvitationCode,
+                    staffInvitationCode,
+                    parentInvitationCode,
+                    schoolType
                     ...rest,
                 }
             })
@@ -68,7 +71,7 @@ export class SchoolService {
             }
             throw new BadRequestException({
                 message: 'Something went wrong while creating the school',
-                error: error.message, // Provide error message in response
+                error: error.message,
             });
         }
     }
@@ -81,44 +84,64 @@ export class SchoolService {
                 where.schoolType = schoolType;
             }
 
-            if (schoolMembers) {
-                where.schoolMembers = schoolMembers;
-            }
-
             if (creatorId) {
                 where.creatorId = creatorId;
             }
 
-            const schools = await this.dbService.school.findMany({ where, orderBy: { createAt: 'desc' } });
+            const schools = await this.dbService.school.findMany({
+                where,
+                orderBy: { createdAt: 'desc' }
+            });
 
-            // Omit the code from the returned objects if it should be private
-            const safeSchool = schools.map(({ studentsCode, teachersCode, schoolStaffsCode, ...rest }) => rest);
+            // Omit the invitation codes from the returned objects
+            const safeSchool = schools.map(({
+                studentInvitationCode,
+                teacherInvitationCode,
+                staffInvitationCode,
+                parentInvitationCode,
+                ...rest
+            }) => rest);
             return safeSchool;
         } catch (error) {
             throw new NotFoundException({
                 message: 'Something went wrong while retrieving schools',
-                error: error.message, // Provide error message in response
+                error: error.message,
             });
         }
     }
-
 
     async findOne(id?: string, username?: string,) {
         if (!id && !username) {
             throw new BadRequestException('You must provide id or username to find a school');
         }
-        // Use findFirst or findUnique based on which fields are truly unique in your schema
-        // Assuming id, username, and code are unique based on your create logic
+
         const where = id ? { id } : { username };
 
         try {
             const school = await this.dbService.school.findUnique({
                 where,
                 include: {
-                    SchoolStaff: true,
-                    Teacher: true,
-                    Student: true,
-                    SchoolJoinRequest: true
+                    staffMembers: {
+                        select: {
+                            userId: true,
+                            staffFullName: true,
+                            staffImage: true,
+                            staffEmail: true,
+                            id: true
+                        }
+                    },
+                    teachers: {
+                        select : {
+                            teacherBio : true,
+                            userId : true,
+                            teacherEmail : true,
+                            id : true,
+                            teacherImage : true
+
+                        }
+                    },
+                    students: true,
+                    joinRequests: true
                 }
             });
 
@@ -126,16 +149,15 @@ export class SchoolService {
                 const identifier = id || username;
                 throw new NotFoundException(`School not found with identifier: ${identifier}`);
             }
-            return school; // Return the safe school object
+            return school;
         } catch (error) {
             console.error('Error retrieving school:', error);
-            // Re-throw NotFoundException if it originated from the "school not found" check
             if (error instanceof NotFoundException) {
                 throw error;
             }
             throw new NotFoundException({
                 message: 'Something went wrong while retrieving school',
-                error: error.message, // Provide error message in response
+                error: error.message,
             });
         }
     }
@@ -144,103 +166,75 @@ export class SchoolService {
         const validation = UpdateSchoolSchema.safeParse(updateSchoolDto);
         if (!validation.success) {
             console.error("Validation Errors:", validation.error.flatten().fieldErrors);
-            throw new BadRequestException({ message: 'Invalid school data provided for update', errors: validation.error.flatten().fieldErrors });
+            throw new BadRequestException({
+                message: 'Invalid school data provided for update',
+                errors: validation.error.flatten().fieldErrors
+            });
         }
 
         const { logo, username: newUsername, name, ...rest } = validation.data;
 
         try {
-            // 1. Fetch the existing school
             const existingSchool = await this.dbService.school.findUnique({ where: { id: schoolId } });
             if (!existingSchool) {
                 throw new BadRequestException('School not found.');
             }
 
-            // 2. Check permissions (e.g., only creator or admin can update)
-            // const updater = await this.dbService.user.findUnique({ where: { id: callingUserId } });
-            // if (!updater) {
-            //     throw new BadRequestException('Updater user not found.');
-            // }
-            // if (existingSchool.creatorId !== callingUserId && updater.role !== "ADMIN") {
-            //     throw new BadRequestException('You do not have permission to update this school.');
-            // }
-
             let finalUsername = existingSchool.username;
-            // 3. Handle username update and potential conflicts
             if (newUsername && newUsername !== existingSchool.username) {
                 const schoolWithNewUsername = await this.dbService.school.findUnique({ where: { username: newUsername } });
                 if (schoolWithNewUsername && schoolWithNewUsername.id !== schoolId) {
-                    // If the new username is taken by *another* school, generate a new one or throw error
-                    // For this example, let's throw an error. You could also generate one like in create.
                     throw new BadRequestException(`Username '${newUsername}' is already taken.`);
                 }
                 finalUsername = newUsername;
-            } else if (name && !newUsername && name !== existingSchool.name) {
-                // Optional: If name changes and username is not explicitly set for update,
-                // you might want to suggest or auto-update the username similarly to create.
-                // For simplicity, we are not doing that here unless `newUsername` is provided.
             }
 
-
-            // 4. Handle logo update
-            let imageUrl = existingSchool.logo; // Keep existing logo by default
+            let imageUrl = existingSchool.logo;
             if (logo && typeof logo === 'string') {
                 if (logo.startsWith('data:image')) {
                     const uploaded = await this.uploadService.uploadBase64Image(logo, 'logos');
                     imageUrl = uploaded.secure_url;
                 } else if (logo.startsWith('http://') || logo.startsWith('https://')) {
-                    // If a new URL is provided directly
                     imageUrl = logo;
-                } else if (logo === "") { // Allow explicitly clearing the logo
-                    imageUrl = null; // Or null, depending on your DB schema
+                } else if (logo === "") {
+                    imageUrl = null;
                 }
             }
 
-
-            // 5. Prepare data for update
             const dataToUpdate: any = {
                 ...rest,
                 username: finalUsername,
                 logo: imageUrl,
             };
 
-            // If name is part of the DTO, include it
             if (name !== undefined) {
                 dataToUpdate.name = name;
             }
 
-            // Remove undefined fields from dataToUpdate to prevent overwriting existing values with undefined
             for (const key in dataToUpdate) {
                 if (dataToUpdate[key] === undefined) {
                     delete dataToUpdate[key];
                 }
             }
 
-            // If no actual data would be changed (e.g. DTO was empty or contained only existing values)
-            // you might choose to return early, though Prisma handles this gracefully.
             if (Object.keys(dataToUpdate).length === 0) {
                 console.log("No changes to apply for school:", schoolId);
-                return existingSchool; // Or throw a message indicating no changes
+                return existingSchool;
             }
 
-
-            // 6. Perform the update
             return await this.dbService.school.update({
                 where: { id: schoolId },
                 data: {
                     ...dataToUpdate,
-                    updatedAt: new Date(), // Explicitly set updatedAt if your ORM doesn't do it automatically
+                    updatedAt: new Date(),
                 },
             });
 
         } catch (error: any) {
-            if (error.code === 'P2002') { // Prisma unique constraint error
-                const target = (error as any).meta?.target;
+            if (error.code === 'P2002') {
+                const target = error.meta?.target;
                 if (target?.includes('username')) {
                     throw new BadRequestException('School with this username already exists.');
-                }
-                if (target?.includes('code') && validation.data.code) { // If code was part of the update and caused error
-                    throw new BadRequestException('School with this code already exists.');
                 }
             }
             console.error("Update School Error:", error);
@@ -251,15 +245,6 @@ export class SchoolService {
         }
     }
 
-    remove(id: string) {
-        return `This action removes a #${id} school`;
-    }
-
-    /**
-     * Sets up the academic structure (classes and modules) for a school based on the provided configuration.
-     * @param schoolAcademicDto The academic configuration for the school.
-     * @returns An object containing the created classes and modules.
-     */
     async setupAcademicStructure(
         schoolAcademicDto: SchoolAcademicDto,
     ): Promise<SchoolAcademicCreationDto> {
@@ -291,10 +276,7 @@ export class SchoolService {
             const academicYear = `${currentYear}-${currentYear + 1}`;
 
             const classesToCreate: Prisma.ClassCreateManyInput[] = [];
-            // We'll now store modules with their intended class level/type
-            const modulesByClass: { className: string; modules: Prisma.ModuleCreateManyInput[] }[] = [];
-
-            // --- Prepare Classes and Module Instances based on Education Level ---
+            const modulesByClass: { className: string; modules: Prisma.CourseContentModuleCreateManyInput[] }[] = [];
 
             // Primary Education (6 classes: P1 to P6)
             if (primarySubjectsOffered && primarySubjectsOffered.length > 0) {
@@ -307,18 +289,14 @@ export class SchoolService {
                         name: className,
                         username: classUsername,
                         schoolId: school.id,
-                        code: generateCode(),
-                        classType: 'SchoolClass',
-                        educationLever: 'Primary',
-                        curriculum: 'REB',
+                        classCode: generateCode(),
+                        classType: 'MAIN_SCHOOL_CLASS',
                     });
 
-                    // Create modules specific to this class
                     const classModules = primarySubjectsOffered.map(subjectName => ({
-                        name: subjectName,
-                        code: generateCode(),
-                        subjectType: ModuleType.General,
-                        curriculum: 'REB',
+                        title: subjectName,
+                        moduleCode: generateCode(),
+                        moduleType: 'CORE_CONTENT',
                     }));
 
                     modulesByClass.push({
@@ -339,28 +317,22 @@ export class SchoolService {
                         name: className,
                         username: classUsername,
                         schoolId: school.id,
-                        code: generateCode(),
-                        classType: 'SchoolClass',
-                        educationLever: 'OLevel',
-                        curriculum: 'REB',
+                        classCode: generateCode(),
+                        classType: 'MAIN_SCHOOL_CLASS',
                     });
 
-                    // Create modules specific to this class
                     const classModules = oLevelCoreSubjects.map(subjectName => ({
-                        name: subjectName,
-                        code: generateCode(),
-                        subjectType: ModuleType.General,
-                        curriculum: 'REB',
+                        title: subjectName,
+                        moduleCode: generateCode(),
+                        moduleType: 'CORE_CONTENT',
                     }));
 
-                    // Add optional subjects if they exist
                     if (validation.data.oLevelOptionSubjects && validation.data.oLevelOptionSubjects.length > 0) {
                         validation.data.oLevelOptionSubjects.forEach(subjectName => {
                             classModules.push({
-                                name: subjectName,
-                                code: generateCode(),
-                                subjectType: ModuleType.General,
-                                curriculum: 'REB',
+                                title: subjectName,
+                                moduleCode: generateCode(),
+                                moduleType: 'SUPPLEMENTARY',
                             });
                         });
                     }
@@ -374,7 +346,7 @@ export class SchoolService {
 
             // Advanced Level (S4, S5, S6 for each combination)
             if (aLevelSubjectCombination && aLevelSubjectCombination.length > 0) {
-                const aLevelLevels = [4, 5, 6]; // Representing S4, S5, S6
+                const aLevelLevels = [4, 5, 6];
 
                 aLevelSubjectCombination.forEach(combination => {
                     aLevelLevels.forEach(levelNumber => {
@@ -386,28 +358,22 @@ export class SchoolService {
                             name: className,
                             username: classUsername,
                             schoolId: school.id,
-                            code: generateCode(),
-                            classType: 'SchoolClass',
-                            educationLever: 'ALevel',
-                            curriculum: 'REB',
+                            classCode: generateCode(),
+                            classType: 'MAIN_SCHOOL_CLASS',
                         });
 
-                        // Create modules specific to this class
                         const classModules = [{
-                            name: combination,
-                            code: generateCode(),
-                            subjectType: ModuleType.General,
-                            curriculum: 'REB',
+                            title: combination,
+                            moduleCode: generateCode(),
+                            moduleType: 'CORE_CONTENT',
                         }];
 
-                        // Add optional subjects if they exist
                         if (validation.data.aLevelOptionSubjects && validation.data.aLevelOptionSubjects.length > 0) {
                             validation.data.aLevelOptionSubjects.forEach(subjectName => {
                                 classModules.push({
-                                    name: subjectName,
-                                    code: generateCode(),
-                                    subjectType: ModuleType.General,
-                                    curriculum: 'REB',
+                                    title: subjectName,
+                                    moduleCode: generateCode(),
+                                    moduleType: 'SUPPLEMENTARY',
                                 });
                             });
                         }
@@ -432,28 +398,22 @@ export class SchoolService {
                             name: className,
                             username: classUsername,
                             schoolId: school.id,
-                            code: generateCode(),
-                            classType: 'SchoolClass',
-                            educationLever: 'TVET',
-                            curriculum: 'TVET',
+                            classCode: generateCode(),
+                            classType: 'MAIN_SCHOOL_CLASS',
                         });
 
-                        // Create modules specific to this class
                         const classModules = [{
-                            name: specializationName,
-                            code: generateCode(),
-                            subjectType: ModuleType.General,
-                            curriculum: 'TVET',
+                            title: specializationName,
+                            moduleCode: generateCode(),
+                            moduleType: 'CORE_CONTENT',
                         }];
 
-                        // Add optional subjects if they exist
                         if (validation.data.tvetOptionSubjects && validation.data.tvetOptionSubjects.length > 0) {
                             validation.data.tvetOptionSubjects.forEach(subjectName => {
                                 classModules.push({
-                                    name: subjectName,
-                                    code: generateCode(),
-                                    subjectType: ModuleType.General,
-                                    curriculum: 'TVET',
+                                    title: subjectName,
+                                    moduleCode: generateCode(),
+                                    moduleType: 'SUPPLEMENTARY',
                                 });
                             });
                         }
@@ -466,7 +426,6 @@ export class SchoolService {
                 });
             }
 
-            // --- Create Classes in the Database ---
             let createdClassesCount = 0;
             if (classesToCreate.length > 0) {
                 const result = await this.dbService.class.createMany({
@@ -475,7 +434,6 @@ export class SchoolService {
                 createdClassesCount = result.count;
             }
 
-            // Retrieve the created classes to link modules
             const classNamesCreated = classesToCreate.map(c => c.name);
             const classesInDb = await this.dbService.class.findMany({
                 where: {
@@ -485,9 +443,8 @@ export class SchoolService {
                 select: { id: true, name: true }
             });
 
-            const finalModuleInstancesToCreate: Prisma.ModuleCreateManyInput[] = [];
+            const finalModuleInstancesToCreate: Prisma.CourseContentModuleCreateManyInput[] = [];
 
-            // Match modules to their specific classes
             modulesByClass.forEach(classModuleData => {
                 const classInDb = classesInDb.find(c => c.name === classModuleData.className);
                 if (classInDb) {
@@ -500,29 +457,29 @@ export class SchoolService {
                 }
             });
 
-            // --- Create Module Instances in the Database ---
             let createdModulesCount = 0;
             if (finalModuleInstancesToCreate.length > 0) {
-                const result = await this.dbService.module.createMany({
+                const result = await this.dbService.courseContentModule.createMany({
                     data: finalModuleInstancesToCreate,
                 });
                 createdModulesCount = result.count;
             }
 
-            // --- Update the School record with Academic Profile and Counts ---
-            const academicProfileData = {
+            const academicProfileData: Prisma.SchoolAcademicProfileInput = {
+                academicYears: [],
+                gradeLevels: [],
+                subjectAreas: [],
+                curriculumFrameworks: ['REB'],
+                defaultGradingScaleDescription: validation.data.defaultGradingScaleDescription,
                 primarySubjectsOffered: validation.data.primarySubjectsOffered ?? [],
                 primaryPassMark: validation.data.primaryPassMark,
-
                 oLevelCoreSubjects: validation.data.oLevelCoreSubjects ?? [],
                 oLevelOptionSubjects: validation.data.oLevelOptionSubjects ?? [],
                 oLevelExaminationTypes: validation.data.oLevelExaminationTypes ?? [],
                 oLevelAssessment: validation.data.oLevelAssessment ?? [],
-
                 aLevelSubjectCombination: validation.data.aLevelSubjectCombination ?? [],
                 aLevelOptionSubjects: validation.data.aLevelOptionSubjects ?? [],
                 aLevelPassMark: validation.data.aLevelPassMark,
-
                 tvetSpecialization: validation.data.tvetSpecialization ?? [],
                 tvetOptionSubjects: validation.data.tvetOptionSubjects ?? [],
             };
@@ -558,126 +515,87 @@ export class SchoolService {
         }
     }
 
-    /**
-    * Sends multiple join requests for school administration personnel based on provided data.
-    * This function is typically used by a school administrator or during initial school setup.
-    * Creates SchoolJoinRequest entries with userId as null, using provided contact details.
-    * @param schoolAdministrationDto The DTO containing school administration contact details.
-    * @returns A result indicating the number of requests attempted and created.
-    */
     async sendAdministrationJoinRequests(schoolAdministrationDto: SchoolAdministrationDto): Promise<sendAdministrationJoinRequestsDto> {
-        // 1. Validate input
         const validation = SchoolAdministrationSchema.safeParse(schoolAdministrationDto);
         if (!validation.success) {
-            // Use format() to get detailed Zod errors
-            throw new BadRequestException('Invalid school administration data provided',);
+            throw new BadRequestException('Invalid school administration data provided');
         }
         const { schoolId, headmasterName, headmasterEmail, headmasterPhone,
-            DirectorOfStudies, principalEmail, principalPhone, // Note: using principalEmail/Phone for DirectorOfStudies
-            additionalAdministration } = validation.data; // Destructure validated data
+            DirectorOfStudies, principalEmail, principalPhone,
+            additionalAdministration } = validation.data;
 
         try {
-            // 2. Verify school existence
             const school = await this.dbService.school.findUnique({ where: { id: schoolId } });
 
             if (!school) {
                 throw new NotFoundException(`School with ID "${schoolId}" not found`);
             }
 
-            // 3. Prepare data for join requests
-            const requestsToCreate: Prisma.SchoolJoinRequestCreateManyInput[] = []; // Use Prisma type for createMany
+            const requestsToCreate: Prisma.SchoolJoinRequestCreateManyInput[] = [];
 
-            // Prepare data for Headmaster (if email is provided, as it's part of unique constraint)
             if (headmasterEmail) {
                 requestsToCreate.push({
                     schoolId: school.id,
-                    role: 'Headmaster', // Assign a specific role string
-                    name: headmasterName,
-                    email: headmasterEmail,
-                    phone: headmasterPhone,
-                    userId: null, // No authenticated user ID for this type of request
-                    // status defaults to 'pending'
+                    requestedRole: 'TEACHER',
+                    requesterName: headmasterName,
+                    requesterEmail: headmasterEmail,
+                    requesterPhone: headmasterPhone,
+                    userId: null,
                 });
             }
 
-
-            // Prepare data for Director of Studies (if email is provided)
-            if (principalEmail) { // Using principalEmail for check as per schema structure
+            if (principalEmail) {
                 requestsToCreate.push({
                     schoolId: school.id,
-                    role: 'DirectorOfStudies', // Assign a specific role string
-                    name: DirectorOfStudies,
-                    email: principalEmail, // Using principalEmail as per schema
-                    phone: principalPhone, // Using principalPhone as per schema
-                    userId: null, // No authenticated user ID
-                    // status defaults to 'pending'
+                    requestedRole: 'TEACHER',
+                    requesterName: DirectorOfStudies,
+                    requesterEmail: principalEmail,
+                    requesterPhone: principalPhone,
+                    userId: null,
                 });
             }
 
-
-            // Prepare data for additional administration personnel (if email is provided for each)
             if (additionalAdministration && additionalAdministration.length > 0) {
                 additionalAdministration.forEach(admin => {
-                    if (admin.email) { // Ensure email is provided for each additional admin
+                    if (admin.email) {
                         requestsToCreate.push({
                             schoolId: school.id,
-                            role: admin.role, // Use the role from the additionalAdministration object
-                            name: admin.name,
-                            email: admin.email,
-                            phone: admin.phone,
-                            userId: null, // No authenticated user ID
-                            // status defaults to 'pending'
+                            requestedRole: admin.role as SchoolJoinRequestRole,
+                            requesterName: admin.name,
+                            requesterEmail: admin.email,
+                            requesterPhone: admin.phone,
+                            userId: null,
                         });
-                    } else {
-                        console.warn(`Skipping additional administration entry due to missing email:`, admin);
-                        // Optionally, you could throw a BadRequestException here or track skipped entries
                     }
                 });
             }
 
-            // If no valid requests were prepared
             if (requestsToCreate.length === 0) {
-                // This might happen if required emails (headmaster, director, additional) were missing
                 throw new BadRequestException('No valid administration contact emails provided to send join requests.');
             }
 
-
-            // 4. Create the join requests in the database
             let createdCount = 0;
-            // Rely on createMany with skipDuplicates for efficiency.
-            // The unique constraint @@unique([userId, schoolId, email]) on SchoolJoinRequest
-            // will prevent duplicate requests with the same schoolId and email (when userId is null).
             try {
                 const result = await this.dbService.schoolJoinRequest.createMany({
-                    data: requestsToCreate as Prisma.Enumerable<Prisma.SchoolJoinRequestCreateManyInput>, // Cast for type safety
+                    data: requestsToCreate,
                 });
                 createdCount = result.count;
             } catch (error) {
-                // P2002 errors for createMany with skipDuplicates are suppressed (skipped),
-                // so this catch block will handle other potential database errors during createMany.
                 console.error('Error during bulk creation of administration join requests:', error);
                 throw new InternalServerErrorException('Something went wrong during the bulk creation of administration join requests.');
             }
-            return { attempted: requestsToCreate.length, created: createdCount, message: `Attempted to create ${requestsToCreate.length} administration join requests.` };
+            return {
+                attempted: requestsToCreate.length,
+                created: createdCount,
+                message: `Attempted to create ${requestsToCreate.length} administration join requests.`
+            };
 
         } catch (error) {
-            // Re-throw known exceptions
             if (error instanceof NotFoundException || error instanceof BadRequestException || error instanceof InternalServerErrorException) {
                 throw error;
             }
-            // Handle other potential errors not caught by createMany's skipDuplicates
             console.error('Unexpected error in sendAdministrationJoinRequests:', error);
             throw new InternalServerErrorException('An unexpected error occurred while processing administration join requests.');
         }
     }
-    // private extractCloudinaryPublicId(imageUrl?: string | null): string | null {
-    //   if (!imageUrl || !imageUrl.includes('cloudinary')) return null;
-
-    //   const parts = imageUrl.split('/');
-    //   const filename = parts[parts.length - 1];
-    //   const publicId = filename.split('.')[0];
-    //   const folder = parts[parts.length - 2];
-
-    //   return `${folder}/${publicId}`;
-    // }
 }

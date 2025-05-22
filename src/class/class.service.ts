@@ -4,7 +4,7 @@ import { UploadService } from 'src/upload/upload.service';
 import { generateCode, generateUsername } from 'src/common/utils/characters.util';
 import { CreateClassInput, CreateClassSchema } from './dto/create-class.dto';
 import { ClassDto } from './dto/class.dto';
-import { ClassType, Teacher } from 'generated/prisma';
+import { ClassTypeOption, Prisma } from 'generated/prisma';
 import { UpdateClassInput, UpdateClassSchema } from './dto/update-class.dto';
 
 @Injectable()
@@ -20,10 +20,11 @@ export class ClassService {
       throw new BadRequestException('Invalid class data provided');
     }
 
-    const { name, schoolId, creatorId, classTeacherId, image: initialImage, username, ...rest } = validation.data;
-    if (!creatorId && !schoolId && !classTeacherId) {
-      throw new BadRequestException("Invalid Create of classes because it any connections of user")
+    const { name, schoolId, creatorId, classTeacherId: primaryTeacherId, image: initialImage, username, ...rest } = validation.data;
+    if (!creatorId && !schoolId && !primaryTeacherId) {
+      throw new BadRequestException("Invalid class creation - missing required connections");
     }
+
     let imageUrl = initialImage;
 
     try {
@@ -42,52 +43,80 @@ export class ClassService {
           throw new NotFoundException(`User with ID "${creatorId}" not found`);
         }
         // Optional: Add role check for creator if only certain roles can create classes
-        if (creator.role !== "TEACHER" && creator.role !== "SCHOOLSTAFF" && creator.role !== "ADMIN") {
+        if (creator.role !== "TEACHER" && creator.role !== "SCHOOL_ADMIN" && creator.role !== "ADMIN") {
           throw new BadRequestException('You do not have permission to create a class');
         }
       }
+
+      // Check if primary teacher exists if primaryTeacherId is provided
+      if (primaryTeacherId) {
+        const teacher = await this.dbService.teacher.findUnique({
+          where: { id: primaryTeacherId },
+          include: { user: true }
+        });
+        if (!teacher) {
+          throw new NotFoundException(`Teacher with ID "${primaryTeacherId}" not found`);
+        }
+      }
+
       // Upload image if it's a base64 string
       if (imageUrl && typeof imageUrl === 'string' && imageUrl.startsWith('data:image')) {
         try {
           const uploaded = await this.uploadService.uploadBase64Image(imageUrl, 'class-images');
           imageUrl = uploaded.secure_url;
         } catch (uploadError) {
-          // Log the upload error and proceed or throw, depending on requirements
           console.error('Image upload failed:', uploadError);
-          // Optionally throw a BadRequestException or handle differently
           throw new BadRequestException('Failed to upload class image');
         }
       }
 
+      const data: Prisma.ClassCreateInput = {
+        name,
+        username: username || generateUsername(name),
+        classImage: imageUrl,
+        classCode: generateCode(),
+        ...rest,
+        classType: rest.classType || 'MAIN_SCHOOL_CLASS',
+      };
+
+      if (schoolId) data.school = { connect: { id: schoolId } };
+      if (creatorId) data.creator = { connect: { id: creatorId } };
+      if (primaryTeacherId) data.primaryTeacher = { connect: { id: primaryTeacherId } };
 
       const createdClass = await this.dbService.class.create({
-        data: {
-          name,
-          username: generateUsername(name),
-          schoolId: schoolId || undefined,
-          creatorId: creatorId || undefined,
-          classTeacherId: classTeacherId || undefined,
-          image: imageUrl,
-          code: generateCode(),
-          ...rest,
-        },
+        data,
+        include: {
+          school: true,
+          creator: true,
+          primaryTeacher: true
+        }
       });
 
-      const { code, ...safeClass } = createdClass;
+      const { classCode, ...safeClass } = createdClass;
       return safeClass;
 
     } catch (error) {
-      // Re-throw known exceptions or wrap others in a generic BadRequestException
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
       }
-      throw new BadRequestException({ message: 'Something went wrong while creating the class', error: error });
+      if (error.code === 'P2002') {
+        if (error.meta?.target?.includes('username')) {
+          throw new BadRequestException('Class with this username already exists');
+        }
+        if (error.meta?.target?.includes('classCode')) {
+          throw new BadRequestException('Generated class code is not unique, please try again');
+        }
+      }
+      throw new BadRequestException({
+        message: 'Something went wrong while creating the class',
+        error: error.message
+      });
     }
   }
 
-  async findAll(schoolId?: string, creatorId?: string, classType?: ClassType) {
+  async findAll(schoolId?: string, creatorId?: string, classType?: ClassTypeOption) {
     try {
-      const where: any = {};
+      const where: Prisma.ClassWhereInput = {};
 
       if (schoolId) {
         where.schoolId = schoolId;
@@ -101,17 +130,36 @@ export class ClassService {
         where.classType = classType;
       }
 
-      return await this.dbService.class.findMany({ where, orderBy: { createAt: 'desc' } });
-
-      // // Omit the code from the returned objects if it should be private
-      // const safeClasses = classes.map(({ code, ...rest }) => rest);
-      // return safeClasses;
+      return await this.dbService.class.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          school: {
+            select: {
+              id: true,
+              name: true,
+              logo: true
+            }
+          },
+          primaryTeacher: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  fullName: true,
+                  image: true
+                }
+              }
+            }
+          }
+        }
+      });
 
     } catch (error) {
       console.error('Error retrieving classes:', error);
       throw new NotFoundException({
         message: 'Something went wrong while retrieving classes',
-        error,
+        error: error.message,
       });
     }
   }
@@ -120,75 +168,110 @@ export class ClassService {
     try {
       const classes = await this.dbService.class.findMany({
         where: { schoolId },
-        orderBy: { createAt: 'desc' },
+        orderBy: { createdAt: 'desc' },
         select: {
           id: true,
           name: true,
-          teacher: true,
-          image: true,
+          classImage: true,
+          classType: true,
           _count: {
             select: {
-              students: true,
+              members: true,
             }
           },
+          primaryTeacher: {
+            select: {
+              user: {
+                select: {
+                  fullName: true,
+                  image: true
+                }
+              }
+            }
+          }
         }
       });
 
-
-      return classes
+      return classes;
     } catch (error) {
       console.error('Error retrieving classes by school ID:', error);
       throw new NotFoundException({
         message: 'Something went wrong while retrieving classes by school ID',
-        error,
+        error: error.message,
       });
     }
   }
-
-
 
   async findOne(id?: string, username?: string, code?: string) {
     if (!id && !code && !username) {
       throw new BadRequestException('You must provide id, code, or username to find a class');
     }
 
-    const where = id ? { id } : code ? { code } : { username };
+    const where = id
+      ? { id }
+      : code
+        ? { classCode: code }
+        : { username };
 
     try {
       const classFound = await this.dbService.class.findUnique({
         where,
         include: {
-          user: true,
-          Module: {
+          courseContentModules: {
             select: {
-              name: true,
               id: true,
-              teacher: {
+              title: true,
+              orderInClass: true,
+              learningMaterials: {
                 select: {
-                  id: true, // Add teacher fields you need here
-                  name: true, // example
+                  id: true,
+                  title: true,
+                  type: true
                 }
               }
             }
           },
-          teacher: {
-            select: {
-              name: true,
-              image: true,
-              email: true,
-              userId: true,
-              id: true
+          members: {
+            include: {
+              user: {
+                select: {
+                  fullName: true,
+                  image: true,
+                  email: true,
+                  id: true,
+                }
+              },
+              teacherRole: {
+                include: {
+                  user: {
+                    select: {
+                      fullName: true,
+                      image: true
+                    }
+                  }
+                }
+              }
             }
           },
-          students: true,
           school: {
             select: {
               username: true,
               name: true,
               logo: true,
-              website: true,
+              websiteUrl: true,
               id: true,
               contact: true
+            }
+          },
+          primaryTeacher: {
+            include: {
+              user: {
+                select: {
+                  fullName: true,
+                  image: true,
+                  email: true
+                }
+              }
             }
           }
         }
@@ -199,47 +282,45 @@ export class ClassService {
         throw new NotFoundException(`Class not found with identifier: ${identifier}`);
       }
 
-      // Omit the code from the returned object if it should be private
-      if (classFound.classType === "Private") {
-        const { code: classCode, ...safeClass } = classFound;
+      if (classFound.classType === "PRIVATE_TUTORING") {
+        const { classCode, ...safeClass } = classFound;
         return safeClass;
       }
 
-      return classFound
+      return classFound;
 
     } catch (error) {
-      // Re-throw known exceptions or wrap others in a generic NotFoundException
       if (error instanceof NotFoundException) {
         throw error;
       }
       console.error('Error retrieving class:', error);
       throw new NotFoundException({
         message: 'Something went wrong while retrieving class',
-        error,
+        error: error.message,
       });
     }
   }
 
   async update(id: string, updateClassDto: UpdateClassInput): Promise<ClassDto> {
-    // Define a Zod schema for update if specific fields are allowed to be updated
-    // For a generic update, you might skip Zod validation here or use a partial schema
-    const updateValidation = UpdateClassSchema.safeParse(updateClassDto);
-    if (!updateValidation.success) {
-      throw new BadRequestException('Invalid class data provided for update');
+    const validation = UpdateClassSchema.safeParse(updateClassDto);
+    if (!validation.success) {
+      throw new BadRequestException('Invalid class update data provided');
     }
 
-    // Cast to a more specific type if you have a defined UpdateClassDto
-    const updateData = updateClassDto as Partial<CreateClassInput>;
-
+    const updateData = validation.data;
 
     try {
-      // Optional: Handle image update if present in updateData
+      const existingClass = await this.dbService.class.findUnique({ where: { id } });
+      if (!existingClass) {
+        throw new NotFoundException(`Class with ID "${id}" not found`);
+      }
+
+      // Handle image update
       if (updateData.image && typeof updateData.image === 'string' && updateData.image.startsWith('data:image')) {
         try {
-          // Optional: Delete old image if it exists
-          const classToUpdate = await this.dbService.class.findUnique({ where: { id } });
-          if (classToUpdate?.image) {
-            await this.uploadService.deleteImage(classToUpdate.image);
+          // Delete old image if it exists
+          if (existingClass.classImage) {
+            await this.uploadService.deleteImage(existingClass.classImage);
           }
 
           const uploaded = await this.uploadService.uploadBase64Image(updateData.image, 'class-images');
@@ -250,26 +331,55 @@ export class ClassService {
         }
       } else if (updateData.image === null || updateData.image === '') {
         // Handle case where image is explicitly set to null or empty string to remove it
-        // Optional: Delete old image if it exists
-        const classToUpdate = await this.dbService.class.findUnique({ where: { id } });
-        if (classToUpdate?.image) {
-          await this.uploadService.deleteImage(classToUpdate.image); // Implement deleteImage in UploadService
+        if (existingClass.classImage) {
+          await this.uploadService.deleteImage(existingClass.classImage);
         }
-        updateData.image = undefined;
+        updateData.image = null;
       }
 
+      // Handle primary teacher update
+      if (updateData.classTeacherId) {
+        const teacher = await this.dbService.teacher.findUnique({
+          where: { id: updateData.classTeacherId },
+          include: { user: true }
+        });
+        if (!teacher) {
+          throw new NotFoundException(`Teacher with ID "${updateData.classTeacherId}" not found`);
+        }
+      }
 
       const updatedClass = await this.dbService.class.update({
         where: { id },
-        data: updateData,
+        data: {
+          schoolId: updateData.schoolId,
+          creatorId: updateClassDto.creatorId,
+          classCode: updateClassDto.code,
+          name: updateClassDto.name,
+          username: updateClassDto.username,
+          classImage: updateData.image,
+          classType: updateData.classType === null ? undefined : updateData.classType,
+
+        },
+        include: {
+          school: true,
+          primaryTeacher: {
+            include: {
+              user: true
+            }
+          }
+        }
       });
 
-      // Omit the code from the returned object if it should be private
       return updatedClass as unknown as ClassDto;
 
     } catch (error) {
-      if (error.code === 'P2025') { // Prisma error code for "An operation failed because it depends on one or more records that were required but not found."
+      if (error.code === 'P2025') {
         throw new NotFoundException(`Class with ID "${id}" not found`);
+      }
+      if (error.code === 'P2002') {
+        if (error.meta?.target?.includes('username')) {
+          throw new BadRequestException('Class with this username already exists');
+        }
       }
       console.error(`Error updating class with ID "${id}":`, error);
       throw new BadRequestException(`Something went wrong while updating class with ID "${id}"`);
@@ -278,22 +388,24 @@ export class ClassService {
 
   async remove(id: string) {
     try {
-      // Optional: Delete associated image before removing the class
       const classToDelete = await this.dbService.class.findUnique({ where: { id } });
-      if (classToDelete?.image) {
-        await this.uploadService.deleteImage(classToDelete.image); // Implement deleteImage in UploadService
+      if (!classToDelete) {
+        throw new NotFoundException(`Class with ID "${id}" not found`);
       }
 
-      const deletedClass = await this.dbService.class.delete({
+      // Delete associated image if it exists
+      if (classToDelete.classImage) {
+        await this.uploadService.deleteImage(classToDelete.classImage);
+      }
+
+      await this.dbService.class.delete({
         where: { id },
       });
 
-      // Omit the code from the returned object if it should be private
-      const { code, ...safeClass } = deletedClass;
-      return safeClass
+      return { message: `Class with ID "${id}" has been deleted successfully` };
 
     } catch (error) {
-      if (error.code === 'P2025') { // Prisma error code for "An operation failed because it depends on one or more records that were required but not found."
+      if (error.code === 'P2025') {
         throw new NotFoundException(`Class with ID "${id}" not found`);
       }
       console.error(`Error removing class with ID "${id}":`, error);

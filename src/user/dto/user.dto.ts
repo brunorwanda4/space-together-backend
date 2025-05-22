@@ -1,6 +1,6 @@
 import z, { string } from "zod";
 
-export const UserRoleEnum = z.enum(["STUDENT", "TEACHER", "ADMIN", "SCHOOLSTAFF"], {
+export const UserRoleEnum = z.enum(["STUDENT", "TEACHER","ADMIN", "PARENT_GUARDIAN", "SCHOOL_STAFF"], {
     required_error: "User role is required",
     invalid_type_error: "Invalid user role",
 });
@@ -44,12 +44,12 @@ export const AuthUserSchema = z.object({
     name: z.string().min(1, {
         message: " Minimum 1 character"
     }),
-    username : z.string().min(1),
+    username: z.string().min(1),
     role: UserRoleEnum.optional(),
     image: z.string().optional(),
-    phone : z.string().optional(),
+    phone: z.string().optional(),
     accessToken: z.string().optional(),
-    schoolAccessToken : z.string().optional(),
+    schoolAccessToken: z.string().optional(),
 })
 
 export type AuthUserDto = z.infer<typeof AuthUserSchema>;
@@ -76,22 +76,22 @@ export const AgeSchema = z.object({
 });
 
 export const AddressSchema = z.object({
-  country: z.string().min(1, { message: "Country is required" }),
-  province: z.string().optional(),
-  district: z.string().optional(),
-  sector: z.string().optional(),
-  cell: z.string().optional(),
-  village: z.string().optional(),
-  state: z.string().optional(), // Note: Seems potentially redundant with province/district/sector depending on country context
-  city: z.string().optional(),
-  street: z.string().optional(),
-  postalCode: z.string().optional(),
-  googleMapUrl: z.string().url({ message: "Invalid Google Map URL" }).optional(), // Added URL validation
+    country: z.string().min(1, { message: "Country is required" }),
+    province: z.string().optional(),
+    district: z.string().optional(),
+    sector: z.string().optional(),
+    cell: z.string().optional(),
+    village: z.string().optional(),
+    state: z.string().optional(), // Note: Seems potentially redundant with province/district/sector depending on country context
+    city: z.string().optional(),
+    street: z.string().optional(),
+    postalCode: z.string().optional(),
+    googleMapUrl: z.string().url({ message: "Invalid Google Map URL" }).optional(), // Added URL validation
 });
 
 // Main User Schema
 export const UserSchema = z.object({
-    id : z.string(),
+    id: z.string(),
     name: z.string().min(1, { message: "Name is required" }).max(50, {
         message: "Maximum characters allowed for name is 50",
     }),
