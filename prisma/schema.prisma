@@ -1,0 +1,1068 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// ======================================
+// GENERATOR CONFIGURATION
+// ======================================
+generator client {
+    provider = "prisma-client-js"
+    output   = "../generated/prisma"
+}
+
+// ======================================
+// DATASOURCE CONFIGURATION
+// ======================================
+datasource db {
+    provider = "mongodb"
+    url      = env("DATABASE_URL")
+}
+
+// ======================================
+// ENUMS
+// ======================================
+enum UserRole {
+    STUDENT_ROLE
+    TEACHER_ROLE
+    SCHOOL_ADMIN_ROLE
+    SCHOOL_STAFF_ROLE
+    PARENT_GUARDIAN_ROLE
+}
+
+enum Gender {
+    FEMALE
+    MALE
+    OTHER
+    PREFER_NOT_TO_SAY
+}
+
+enum SchoolType {
+    K_12
+    HIGHER_EDUCATION
+    TUTORING_CENTER
+    VOCATIONAL
+    OTHER
+}
+
+enum SchoolMembershipType {
+    MIXED
+    BOYS_ONLY
+    GIRLS_ONLY
+}
+
+enum AttendanceSystemType {
+    MANUAL
+    PLATFORM_INTEGRATED
+    THIRD_PARTY_INTEGRATION
+}
+
+enum ClassTypeOption {
+    MAIN_SCHOOL_CLASS
+    EXTRACURRICULAR
+    STUDY_GROUP
+    PRIVATE_TUTORING
+    PUBLIC_COURSE
+}
+
+enum ClassJoinPermissionOption {
+    ADMIN_TEACHER_ONLY
+    INVITATION_CODE_ONLY
+    ADMIN_TEACHER_OR_CODE
+    OPEN_ENROLLMENT
+    APPROVAL_REQUIRED
+}
+
+enum ClassMemberRoleOption {
+    PRIMARY_TEACHER
+    ASSISTANT_TEACHER
+    STUDENT
+    OBSERVER
+    PARENT_OBSERVER
+    MONITOR
+}
+
+enum CourseContentModuleType {
+    CORE_CONTENT
+    SUPPLEMENTARY
+    ASSESSMENT_SECTION
+}
+
+enum LearningMaterialType {
+    TEXT_PAGE
+    FILE_UPLOAD
+    VIDEO_EMBED
+    VIDEO_UPLOAD
+    AUDIO_EMBED
+    AUDIO_UPLOAD
+    EXTERNAL_RESOURCE_LINK
+    INTERACTIVE_LTI_TOOL
+}
+
+enum AssessmentItemType {
+    ASSIGNMENT
+    QUIZ
+    EXAM
+    PROJECT
+    PARTICIPATION
+}
+
+enum QuestionItemType {
+    MULTIPLE_CHOICE_SINGLE_ANSWER
+    MULTIPLE_CHOICE_MULTIPLE_ANSWERS
+    TRUE_FALSE
+    SHORT_TEXT_ANSWER
+    LONG_ESSAY_ANSWER
+    FILL_IN_THE_BLANKS
+    MATCHING
+    FILE_UPLOAD_ANSWER
+}
+
+enum AnnouncementAudienceScope {
+    SCHOOL_WIDE_ALL
+    SCHOOL_WIDE_ROLES
+    CLASS_SPECIFIC
+}
+
+enum EventAudienceScope {
+    SCHOOL_WIDE
+    CLASS_SPECIFIC
+    USER_PERSONAL
+}
+
+enum SchoolJoinRequestStatus {
+    PENDING
+    APPROVED
+    REJECTED
+    CANCELLED
+}
+
+enum SchoolJoinRequestRole {
+    TEACHER
+    STUDENT
+    STAFF
+    PARENT
+}
+
+// ======================================
+// COMPOSITE TYPES
+// ======================================
+type Age {
+    year  Int
+    month Int
+    day   Int
+}
+
+type Address {
+    country      String
+    province     String?
+    district     String?
+    sector       String?
+    cell         String?
+    village      String?
+    state        String?
+    city         String?
+    street       String?
+    postalCode   String?
+    googleMapUrl String?
+}
+
+type Contact {
+    phone          String
+    email          String
+    whatsappNumber String?
+}
+
+type SocialMediaLink {
+    platform String
+    link     String
+}
+
+type SchoolTerm {
+    name      String
+    startDate DateTime
+    endDate   DateTime
+}
+
+type SchoolAcademicYearInfo {
+    yearName  String
+    startDate DateTime
+    endDate   DateTime
+    terms     SchoolTerm[]
+}
+
+type SchoolGradeLevelInfo {
+    name        String
+    description String?
+}
+
+type SchoolSubjectAreaInfo {
+    name        String
+    code        String?
+    description String?
+}
+
+type SchoolAcademicProfile {
+    academicYears                  SchoolAcademicYearInfo[]
+    gradeLevels                    SchoolGradeLevelInfo[]
+    subjectAreas                   SchoolSubjectAreaInfo[]
+    curriculumFrameworks           String[]
+    defaultGradingScaleDescription String?
+    primarySubjectsOffered         String[]
+    primaryPassMark                Int?
+    oLevelCoreSubjects             String[]
+    oLevelOptionSubjects           String[]
+    oLevelExaminationTypes         String[]
+    oLevelAssessment               String[]
+    aLevelSubjectCombination       String[]
+    aLevelOptionSubjects           String[]
+    aLevelPassMark                 Int?
+    tvetSpecialization             String[]
+    tvetOptionSubjects             String[]
+}
+
+type ClassSettings {
+    joinPermission              ClassJoinPermissionOption @default(ADMIN_TEACHER_ONLY)
+    showMemberList              Boolean                   @default(true)
+    allowFileSharing            Boolean                   @default(true)
+    allowDiscussions            Boolean                   @default(true)
+    announcementsOnlyToTeachers Boolean                   @default(false)
+    maxStudents                 Int?
+}
+
+// ======================================
+// MODELS
+// ======================================
+
+// --------------------------
+// User and Authentication
+// --------------------------
+model User {
+    // --- Identification ---
+    id       String    @id @default(auto()) @map("_id") @db.ObjectId
+    email    String    @unique
+    username String    @unique
+    password String?
+    role     UserRole?
+
+    // --- Profile ---
+    fullName    String
+    image       String?
+    phoneNumber String?
+    country     String?
+    timezone    String?
+    gender      Gender?
+    dateOfBirth DateTime?
+    bio         String?
+    address     Address?
+
+    // --- Account Status ---
+    isEmailVerified Boolean   @default(false)
+    isActive        Boolean   @default(true)
+    lastLogin       DateTime?
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // --- Relationships: School Roles ---
+    schoolCreatorOf    School[]        @relation("SchoolCreator")
+    schoolStaffEntries SchoolStaff[]
+    teacherEntries     Teacher[]
+    studentEntries     Student[]
+    parentGuardianInfo ParentGuardian? // This implies a User can be ONE ParentGuardian
+
+    // --- Relationships: Requests & Invitations ---
+    schoolJoinRequests  SchoolJoinRequest[]
+    invitedClassMembers ClassMember[]       @relation("InvitedByRelation")
+
+    // --- Relationships: Class Memberships ---
+    classMemberships ClassMember[]
+
+    // --- Relationships: Content Creation & Interaction ---
+    createdClasses              Class[]               @relation("ClassCreator")
+    createdAssessments          Assessment[]          @relation("AssessmentCreator")
+    createdCourseContentModules CourseContentModule[] @relation("CourseContentModuleAuthor")
+    authoredAnnouncements       Announcement[]        @relation("AnnouncementAuthor")
+    authoredDiscussionThreads   DiscussionThread[]    @relation("ThreadAuthor")
+    authoredDiscussionPosts     DiscussionPost[]      @relation("PostAuthor")
+    createdEvents               Event[]               @relation("EventCreator")
+    uploadedAssets              AssetAttachment[]     @relation("UploadedAssets")
+    submittedSubmissions        Submission[]          @relation("SubmissionStudent")
+    gradedSubmissions           Submission[]          @relation("SubmissionGrader")
+    sentDirectMessages          DirectMessage[]       @relation("SentMessages")
+    receivedDirectMessages      DirectMessage[]       @relation("ReceivedMessages")
+}
+
+// --------------------------
+// School Module
+// --------------------------
+model School {
+    // --- Identification ---
+    id        String @id @default(auto()) @map("_id") @db.ObjectId
+    creatorId String @db.ObjectId
+    creator   User   @relation("SchoolCreator", fields: [creatorId], references: [id])
+
+    // --- School Identity ---
+    name        String     @unique // Assuming school name should be unique, or use username
+    username    String     @unique
+    logoUrl     String?
+    schoolType  SchoolType
+    description String?
+
+    // --- Contact & Location ---
+    address     Address?
+    contact     Contact?
+    websiteUrl  String?
+    socialMedia SocialMediaLink[]
+
+    // --- Academic Setup ---
+    academicProfile SchoolAcademicProfile?
+
+    // --- Configuration ---
+    themeColorPrimary String?
+
+    // --- Invitation Codes ---
+    studentInvitationCode String? @unique
+    teacherInvitationCode String? @unique
+    staffInvitationCode   String? @unique
+    parentInvitationCode  String? @unique
+    requireCodeForJoin    Boolean @default(false)
+
+    // --- Statistics & Capacities ---
+    studentCapacity     Int?
+    totalClasses        Int? // Consider making this a computed field or removing if not directly managed
+    totalModules        Int? // Consider making this a computed field or removing if not directly managed
+    classrooms          Int?
+    membershipType      SchoolMembershipType?
+    accreditationNumber String?
+    affiliation         String?
+
+    // --- Facilities & Offerings ---
+    libraryAvailable         Boolean?
+    labFacilities            String[]
+    sportsAndExtracurricular String[]
+    offersOnlineClasses      Boolean?
+    uniformRequired          Boolean?
+    attendanceSystem         AttendanceSystemType?
+    scholarshipAvailable     Boolean?
+
+    // --- Platform Status ---
+    isActive  Boolean  @default(true)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // --- Relationships ---
+    staffMembers       SchoolStaff[]
+    teachers           Teacher[]
+    students           Student[]
+    parentAssociations SchoolParentAssociation[] @relation("SchoolParentLinks") // Explicit join to ParentGuardian
+    classes            Class[]
+    courseTemplates    CourseTemplate[]
+    joinRequests       SchoolJoinRequest[]
+    announcements      Announcement[]            @relation("SchoolAnnouncements") // Announcements for the whole school
+    events             Event[]                   @relation("SchoolEvents") // Events for the whole school
+}
+
+model SchoolStaff {
+    // --- Identification ---
+    id       String @id @default(auto()) @map("_id") @db.ObjectId
+    userId   String @db.ObjectId
+    user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+    schoolId String @db.ObjectId
+    school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+    // --- Role Details ---
+    roleTitle String
+
+    // --- Denormalized fields for easy access ---
+    staffFullName String? // Populated from User.fullName
+    staffEmail    String? // Populated from User.email
+    staffPhone    String? // Populated from User.phoneNumber
+    staffImage    String? // Populated from User.profileImage
+
+    // --- Status & Timestamps ---
+    isActive  Boolean  @default(true)
+    joinedAt  DateTime @default(now())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@unique([userId, schoolId, roleTitle])
+}
+
+model Teacher {
+    // --- Identification ---
+    id       String @id @default(auto()) @map("_id") @db.ObjectId
+    userId   String @db.ObjectId
+    user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+    schoolId String @db.ObjectId
+    school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+    // --- Teacher-specific info ---
+    teacherIdNumber     String?
+    department          String?
+    subjectsOfExpertise String[]
+    yearsOfExperience   Int?
+
+    // --- Denormalized fields ---
+    teacherFullName String? // Populated from User.fullName
+    teacherEmail    String? // Populated from User.email
+    teacherPhone    String? // Populated from User.phoneNumber
+    teacherImage    String? // Populated from User.profileImage
+    teacherBio      String? // Populated from User.bio
+
+    // --- Status & Timestamps ---
+    isActive  Boolean  @default(true)
+    joinedAt  DateTime @default(now())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // --- Relationships ---
+    classesTaught             Class[]       @relation("ClassPrimaryTeacher")
+    classMembershipsAsTeacher ClassMember[] @relation("TeacherClassMembership")
+
+    @@unique([userId, schoolId])
+}
+
+model Student {
+    // --- Identification ---
+    id       String @id @default(auto()) @map("_id") @db.ObjectId
+    userId   String @db.ObjectId
+    user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+    schoolId String @db.ObjectId
+    school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+    // --- Student-specific info ---
+    studentIdNumber        String?
+    currentGradeLevelName  String?
+    enrollmentDate         DateTime @default(now())
+    expectedGraduationYear Int?
+
+    // --- Denormalized fields ---
+    studentFullName String? // Populated from User.fullName
+    studentEmail    String? // Populated from User.email
+    studentImage    String? // Populated from User.profileImage
+
+    // --- Status & Timestamps ---
+    isActive  Boolean  @default(true)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // --- Relationships ---
+    parentLinks StudentParentLink[] // Links to specific parents for this student
+
+    @@unique([userId, schoolId])
+}
+
+model ParentGuardian {
+    // --- Identification ---
+    id     String @id @default(auto()) @map("_id") @db.ObjectId
+    userId String @unique @db.ObjectId // Each ParentGuardian is a User
+    user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    // --- Parent-specific info ---
+    preferredContactMethod String?
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // --- Relationships ---
+    schoolAssociations SchoolParentAssociation[] @relation("ParentSchoolLinks") // Explicit join to School
+    linkedStudents     StudentParentLink[] // Students this parent is linked to
+}
+
+// Explicit Join Table for School and ParentGuardian (Many-to-Many)
+model SchoolParentAssociation {
+    id             String         @id @default(auto()) @map("_id") @db.ObjectId
+    schoolId       String         @db.ObjectId
+    school         School         @relation("SchoolParentLinks", fields: [schoolId], references: [id], onDelete: Cascade)
+    parentId       String         @db.ObjectId
+    parentGuardian ParentGuardian @relation("ParentSchoolLinks", fields: [parentId], references: [id], onDelete: Cascade)
+
+    // --- Timestamps for the association ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@unique([schoolId, parentId])
+    @@map("school_parent_associations") // Explicit collection name for the join table
+}
+
+model StudentParentLink {
+    // --- Identification ---
+    id        String         @id @default(auto()) @map("_id") @db.ObjectId
+    studentId String         @db.ObjectId
+    student   Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+    parentId  String         @db.ObjectId // This refers to ParentGuardian id
+    parent    ParentGuardian @relation(fields: [parentId], references: [id], onDelete: Cascade)
+
+    // --- Relationship details ---
+    relationshipToStudent String
+    canViewGrades         Boolean @default(true)
+    canViewAttendance     Boolean @default(true)
+    canCommunicateTeacher Boolean @default(true)
+
+    // --- Status & Timestamps ---
+    isActive  Boolean  @default(true)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@unique([studentId, parentId])
+}
+
+// --------------------------
+// Class and Course Management
+// --------------------------
+model CourseTemplate {
+    // --- Identification ---
+    id       String @id @default(auto()) @map("_id") @db.ObjectId
+    schoolId String @db.ObjectId
+    school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+    // --- Course details ---
+    title               String
+    courseCode          String? // Should be unique within a school if used as an identifier
+    description         String?
+    subjectAreaName     String?
+    gradeLevelNames     String[]
+    defaultSyllabusText String?
+    learningObjectives  String[]
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // --- Relationships ---
+    classInstances Class[]
+
+    @@unique([schoolId, title])
+    @@unique([schoolId, courseCode]) // If courseCode is mandatory and unique per school
+}
+
+model Class {
+    // --- Identification ---
+    id               String          @id @default(auto()) @map("_id") @db.ObjectId
+    schoolId         String          @db.ObjectId
+    school           School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+    creatorId        String          @db.ObjectId
+    creator          User            @relation("ClassCreator", fields: [creatorId], references: [id])
+    courseTemplateId String?         @db.ObjectId
+    courseTemplate   CourseTemplate? @relation(fields: [courseTemplateId], references: [id], onDelete: SetNull)
+
+    // --- Class details ---
+    name          String
+    classCode     String          @unique // Unique code for joining the class
+    username      String          @unique // Unique username/slug for the class
+    description   String?
+    classImageUrl String?
+    classType     ClassTypeOption @default(MAIN_SCHOOL_CLASS)
+
+    // --- Scheduling ---
+    academicTermName String?
+    startDate        DateTime?
+    endDate          DateTime?
+    meetingTimes     String? // E.g., "Mon, Wed 9:00-10:30 AM"
+
+    // --- Teacher ---
+    primaryTeacherId String?  @db.ObjectId
+    primaryTeacher   Teacher? @relation("ClassPrimaryTeacher", fields: [primaryTeacherId], references: [id], onDelete: SetNull)
+
+    // --- Settings ---
+    settings ClassSettings?
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // --- Relationships ---
+    members              ClassMember[]
+    courseContentModules CourseContentModule[]
+    assessments          Assessment[]
+    discussionForums     DiscussionForum[]
+    announcements        Announcement[]        @relation("ClassAnnouncements") // Announcements specific to this class
+    events               Event[]               @relation("ClassEvents") // Events specific to this class
+    joinRequests         SchoolJoinRequest[]   @relation("ClassJoinRequests")
+}
+
+model ClassMember {
+    // --- Identification ---
+    id      String @id @default(auto()) @map("_id") @db.ObjectId
+    userId  String @db.ObjectId
+    user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+    classId String @db.ObjectId
+    class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+    // --- Role & Status ---
+    role     ClassMemberRoleOption @default(STUDENT)
+    joinedAt DateTime              @default(now())
+    isActive Boolean               @default(true)
+
+    // --- Invitation ---
+    invitedById String? @db.ObjectId
+    invitedBy   User?   @relation("InvitedByRelation", fields: [invitedById], references: [id], onDelete: SetNull)
+
+    // --- Permissions (primarily for teachers/admins within a class context) ---
+    canManageStudents     Boolean? // E.g., remove students, manage roles
+    canManageClassContent Boolean? // E.g., add/edit modules, assessments
+    canPostAnnouncements  Boolean?
+    canStartMeetings      Boolean?
+    canGradeSubmissions   Boolean?
+
+    // --- Observer specific info ---
+    observingStudentId String? // If role is PARENT_OBSERVER, this links to the student ID they are observing in this class
+
+    // --- Teacher specific info (if member is a teacher) ---
+    teacherRoleId String?  @db.ObjectId // Links to Teacher model if this member is a teacher in the school
+    teacherRole   Teacher? @relation("TeacherClassMembership", fields: [teacherRoleId], references: [id], onDelete: SetNull)
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@unique([userId, classId, role]) // A user can have one role per class
+    @@index([classId, role])
+}
+
+// --------------------------
+// Course Content
+// --------------------------
+model CourseContentModule {
+    // --- Identification ---
+    id       String @id @default(auto()) @map("_id") @db.ObjectId
+    classId  String @db.ObjectId
+    class    Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+    authorId String @db.ObjectId
+    author   User   @relation("CourseContentModuleAuthor", fields: [authorId], references: [id]) // Assuming author is a User
+
+    // --- Module details ---
+    title        String
+    moduleCode   String? // Optional code for the module, unique within class if used
+    description  String?
+    orderInClass Int // To order modules within a class
+
+    // --- Type and timing ---
+    moduleType             CourseContentModuleType?
+    estimatedLearningHours Int?
+    isVisibleToStudents    Boolean                  @default(true)
+    availabilityStartDate  DateTime?
+    availabilityEndDate    DateTime?
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // --- Relationships ---
+    learningMaterials LearningMaterial[]
+
+    @@unique([classId, moduleCode]) // If moduleCode is used and should be unique per class
+    @@index([classId, orderInClass])
+}
+
+model LearningMaterial {
+    // --- Identification ---
+    id                    String              @id @default(auto()) @map("_id") @db.ObjectId
+    courseContentModuleId String              @db.ObjectId
+    courseContentModule   CourseContentModule @relation(fields: [courseContentModuleId], references: [id], onDelete: Cascade)
+    assetAttachmentId     String?             @unique @db.ObjectId // For FILE_UPLOAD, VIDEO_UPLOAD, AUDIO_UPLOAD
+    assetAttachment       AssetAttachment?    @relation(fields: [assetAttachmentId], references: [id], onDelete: SetNull)
+
+    // --- Material details ---
+    title         String
+    description   String?
+    type          LearningMaterialType
+    orderInModule Int // To order materials within a module
+
+    // --- Content specific fields ---
+    textContent  String? // For TEXT_PAGE
+    embedUrl     String? // For VIDEO_EMBED, AUDIO_EMBED
+    ltiLaunchUrl String? // For INTERACTIVE_LTI_TOOL
+
+    // --- Visibility & Timestamps ---
+    isVisibleToStudents Boolean  @default(true)
+    createdAt           DateTime @default(now())
+    updatedAt           DateTime @updatedAt
+
+    @@index([courseContentModuleId, orderInModule])
+}
+
+// --------------------------
+// Assessments and Grading
+// --------------------------
+model Assessment {
+    // --- Identification ---
+    id        String @id @default(auto()) @map("_id") @db.ObjectId
+    classId   String @db.ObjectId
+    class     Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+    creatorId String @db.ObjectId
+    creator   User   @relation("AssessmentCreator", fields: [creatorId], references: [id])
+
+    // --- Assessment details ---
+    title        String
+    instructions String?
+    type         AssessmentItemType
+    maxPoints    Float?
+    dueDate      DateTime?
+    publishDate  DateTime? // When the assessment becomes visible/available to students
+
+    // --- Quiz/Exam specific settings ---
+    timeLimitMinutes         Int?
+    shuffleQuestions         Boolean? @default(false)
+    allowMultipleAttempts    Boolean? @default(false)
+    maxAttempts              Int?     @default(1)
+    showCorrectAnswersPolicy String? // E.g., "AFTER_DUE_DATE", "AFTER_SUBMISSION", "NEVER"
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // --- Relationships ---
+    questions        Question[]
+    submissions      Submission[]
+    assetAttachments AssessmentAsset[] // Explicit relation through join table
+}
+
+model Question {
+    // --- Identification ---
+    id           String     @id @default(auto()) @map("_id") @db.ObjectId
+    assessmentId String     @db.ObjectId
+    assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+    // --- Question details ---
+    text              String
+    questionType      QuestionItemType
+    points            Float            @default(1)
+    orderInAssessment Int // To order questions within an assessment
+    allowedFileTypes  String[] // For FILE_UPLOAD_ANSWER, e.g., ["pdf", "docx"]
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // --- Relationships ---
+    options           QuestionOption[]
+    submissionAnswers SubmissionAnswer[] // All answers submitted for this question across all submissions
+
+    @@index([assessmentId, orderInAssessment])
+}
+
+model QuestionOption {
+    // --- Identification ---
+    id         String   @id @default(auto()) @map("_id") @db.ObjectId
+    questionId String   @db.ObjectId
+    question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+    // --- Option details ---
+    text      String
+    isCorrect Boolean @default(false)
+    order     Int // To order options for a question
+    feedback  String? // Feedback specific to choosing this option
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([questionId, order])
+}
+
+model Submission {
+    // --- Identification ---
+    id           String     @id @default(auto()) @map("_id") @db.ObjectId
+    assessmentId String     @db.ObjectId
+    assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+    studentId    String     @db.ObjectId
+    student      User       @relation("SubmissionStudent", fields: [studentId], references: [id], onDelete: Cascade) // User with STUDENT_ROLE
+    classId      String     @db.ObjectId // Denormalized for easier querying of submissions per class
+
+    // --- Submission info ---
+    submittedAt   DateTime @default(now())
+    attemptNumber Int      @default(1)
+    isLate        Boolean  @default(false)
+
+    // --- Grading info ---
+    grade        Float?
+    feedbackText String? // Overall feedback for the submission
+    gradedAt     DateTime?
+    graderId     String?   @db.ObjectId
+    grader       User?     @relation("SubmissionGrader", fields: [graderId], references: [id], onDelete: SetNull) // User who graded
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // --- Relationships ---
+    answers          SubmissionAnswer[]
+    assetAttachments SubmissionAsset[] // Explicit relation through join table
+
+    @@unique([assessmentId, studentId, attemptNumber])
+    @@index([classId, studentId])
+    @@index([assessmentId, submittedAt])
+}
+
+model SubmissionAnswer {
+    // --- Identification ---
+    id           String     @id @default(auto()) @map("_id") @db.ObjectId
+    submissionId String     @db.ObjectId
+    submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+    questionId   String     @db.ObjectId
+    question     Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+    // --- Answer content ---
+    answerText        String? // For SHORT_TEXT_ANSWER, LONG_ESSAY_ANSWER, FILL_IN_THE_BLANKS
+    selectedOptionIds String[] // For MULTIPLE_CHOICE (stores QuestionOption IDs)
+    fileAnswerId      String?          @unique @db.ObjectId // For FILE_UPLOAD_ANSWER
+    fileAnswer        AssetAttachment? @relation(fields: [fileAnswerId], references: [id], onDelete: SetNull)
+
+    // --- Grading (per answer, if applicable) ---
+    pointsAwarded  Float?
+    teacherComment String?
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@unique([submissionId, questionId]) // One answer per question per submission
+}
+
+// --------------------------
+// Asset Management
+// --------------------------
+model AssetAttachment {
+    // --- Identification ---
+    id String @id @default(auto()) @map("_id") @db.ObjectId
+
+    // --- Uploader info ---
+    uploaderId String @db.ObjectId
+    uploader   User   @relation("UploadedAssets", fields: [uploaderId], references: [id])
+
+    // --- File details ---
+    fileName      String
+    filePath      String // URL or path to the stored file
+    fileType      String // MIME type or extension
+    fileSizeBytes Int
+    description   String?
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    // No direct updatedAt, as file metadata might not change, or new version is new asset.
+
+    // --- Relationships (Asset can be used in multiple contexts) ---
+    // An asset used as a learning material (points from LearningMaterial to AssetAttachment)
+    learningMaterialOrigin LearningMaterial? // Back-relation if LearningMaterial.assetAttachmentId points here
+
+    // An asset submitted as an answer to a file upload question
+    submissionAnswerFile SubmissionAnswer? // Back-relation if SubmissionAnswer.fileAnswerId points here
+    AssessmentAsset      AssessmentAsset[]
+    SubmissionAsset      SubmissionAsset[]
+}
+
+// Explicit join tables for many-to-many relationships
+model AssessmentAsset {
+    id           String          @id @default(auto()) @map("_id") @db.ObjectId
+    assessmentId String          @db.ObjectId
+    assessment   Assessment      @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+    assetId      String          @db.ObjectId
+    asset        AssetAttachment @relation(fields: [assetId], references: [id], onDelete: Cascade)
+    createdAt    DateTime        @default(now())
+
+    @@unique([assessmentId, assetId])
+}
+
+model SubmissionAsset {
+    id           String          @id @default(auto()) @map("_id") @db.ObjectId
+    submissionId String          @db.ObjectId
+    submission   Submission      @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+    assetId      String          @db.ObjectId
+    asset        AssetAttachment @relation(fields: [assetId], references: [id], onDelete: Cascade)
+    createdAt    DateTime        @default(now())
+
+    @@unique([submissionId, assetId])
+}
+
+// --------------------------
+// Communication
+// --------------------------
+model Announcement {
+    // --- Identification ---
+    id       String @id @default(auto()) @map("_id") @db.ObjectId
+    schoolId String @db.ObjectId // School this announcement belongs to
+    school   School @relation("SchoolAnnouncements", fields: [schoolId], references: [id], onDelete: Cascade)
+    authorId String @db.ObjectId
+    author   User   @relation("AnnouncementAuthor", fields: [authorId], references: [id])
+
+    // --- Announcement content ---
+    title   String
+    content String // Can be HTML or Markdown
+
+    // --- Audience & Targeting ---
+    audienceScope AnnouncementAudienceScope
+    targetClassId String?                   @db.ObjectId // If CLASS_SPECIFIC
+    targetClass   Class?                    @relation("ClassAnnouncements", fields: [targetClassId], references: [id], onDelete: Cascade)
+    targetRoles   UserRole[] // If SCHOOL_WIDE_ROLES
+
+    // --- Publication ---
+    isPublished Boolean  @default(true)
+    publishDate DateTime @default(now()) // Can be scheduled for future
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([schoolId, publishDate])
+    @@index([targetClassId, publishDate])
+}
+
+model DiscussionForum {
+    // --- Identification ---
+    id      String @id @default(auto()) @map("_id") @db.ObjectId
+    classId String @unique @db.ObjectId // Each class can have one main discussion forum
+    class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+    // --- Forum details ---
+    title       String // E.g., "General Discussion", "Q&A"
+    description String?
+    isModerated Boolean @default(true) // If posts require approval
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // --- Relationships ---
+    threads DiscussionThread[]
+}
+
+model DiscussionThread {
+    // --- Identification ---
+    id       String          @id @default(auto()) @map("_id") @db.ObjectId
+    forumId  String          @db.ObjectId
+    forum    DiscussionForum @relation(fields: [forumId], references: [id], onDelete: Cascade)
+    authorId String          @db.ObjectId
+    author   User            @relation("ThreadAuthor", fields: [authorId], references: [id])
+
+    // --- Thread details ---
+    title    String
+    isPinned Boolean @default(false) // Pinned threads appear at the top
+    isLocked Boolean @default(false) // Locked threads do not allow new posts
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // --- Relationships ---
+    posts DiscussionPost[]
+
+    @@index([forumId, updatedAt]) // For sorting threads by recent activity
+}
+
+model DiscussionPost {
+    // --- Identification ---
+    id       String           @id @default(auto()) @map("_id") @db.ObjectId
+    threadId String           @db.ObjectId
+    thread   DiscussionThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+    authorId String           @db.ObjectId
+    author   User             @relation("PostAuthor", fields: [authorId], references: [id])
+
+    // --- Post Content ---
+    content String // Can be HTML or Markdown
+
+    // --- Threading (for replies) ---
+    parentPostId String?          @db.ObjectId
+    parentPost   DiscussionPost?  @relation("RepliesToPost", fields: [parentPostId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+    replies      DiscussionPost[] @relation("RepliesToPost")
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([threadId, createdAt])
+}
+
+model DirectMessage {
+    // --- Identification ---
+    id         String @id @default(auto()) @map("_id") @db.ObjectId
+    senderId   String @db.ObjectId
+    sender     User   @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+    receiverId String @db.ObjectId
+    receiver   User   @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+
+    // --- Message content & Status ---
+    content String
+    isRead  Boolean   @default(false)
+    readAt  DateTime?
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt // If messages can be edited
+
+    @@index([senderId, receiverId, createdAt])
+    @@index([receiverId, senderId, createdAt]) // For querying conversations
+}
+
+// --------------------------
+// Calendar and Events
+// --------------------------
+model Event {
+    // --- Identification ---
+    id        String @id @default(auto()) @map("_id") @db.ObjectId
+    creatorId String @db.ObjectId
+    creator   User   @relation("EventCreator", fields: [creatorId], references: [id])
+
+    // --- Event Details ---
+    title       String
+    description String?
+    startTime   DateTime
+    endTime     DateTime
+    isAllDay    Boolean  @default(false)
+    location    String? // Physical location or online meeting URL
+
+    // --- Audience & Targeting ---
+    audienceScope EventAudienceScope
+    schoolId      String?            @db.ObjectId // If SCHOOL_WIDE or for a specific school context
+    school        School?            @relation("SchoolEvents", fields: [schoolId], references: [id], onDelete: Cascade)
+    targetClassId String?            @db.ObjectId // If CLASS_SPECIFIC
+    targetClass   Class?             @relation("ClassEvents", fields: [targetClassId], references: [id], onDelete: Cascade)
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([schoolId, startTime])
+    @@index([targetClassId, startTime])
+    @@index([creatorId, startTime]) // For user's personal events
+}
+
+// --------------------------
+// Join Requests
+// --------------------------
+model SchoolJoinRequest {
+    // --- Identification ---
+    id     String  @id @default(auto()) @map("_id") @db.ObjectId
+    userId String? @db.ObjectId // If the request is from an existing platform user
+    user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+    schoolId String @db.ObjectId
+    school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+    // --- Requester info (can be a non-platform user initially) ---
+    requesterName  String? // Name provided by requester if not a platform user
+    requesterEmail String // Email is mandatory for contact
+    requesterPhone String?
+
+    // --- Request details ---
+    requestedRole SchoolJoinRequestRole
+    targetClassId String?               @db.ObjectId // If requesting to join a specific class
+    targetClass   Class?                @relation("ClassJoinRequests", fields: [targetClassId], references: [id], onDelete: SetNull)
+    message       String? // Message from the requester
+    isFromUser    Boolean               @default(false) // True if userId is populated (request from existing user)
+
+    // --- Status & Processing ---
+    status            SchoolJoinRequestStatus @default(PENDING)
+    processedByUserId String?                 @db.ObjectId // User ID of admin/teacher who processed
+    processedAt       DateTime?
+
+    // --- Timestamps ---
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@unique([requesterEmail, schoolId, requestedRole, targetClassId, status], name: "unique_join_request_constraint")
+    @@index([schoolId, status])
+    @@index([targetClassId, status])
+    @@map("school_join_requests") // Explicit collection name
+}
